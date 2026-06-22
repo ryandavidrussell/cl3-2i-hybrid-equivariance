@@ -1,0 +1,216 @@
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{authblk}
+
+\title{\textbf{Clifford Algebra $\times$ Discrete Group Symmetry:\\When Hybrid Equivariance Wins, and Why}}
+\author{Ryan David Russell}
+\affil{Kaleidoworks}
+\date{2026}
+
+\newtheorem{proposition}{Proposition}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Equivariant architectures encode either continuous symmetry (e.g.\ SO(3) via Clifford/geometric-algebra layers) or discrete symmetry (e.g.\ a finite point group via graph convolution), but combining the two is usually treated as straightforward concatenation.
+We show it is not.
+First, we prove a small representation-theoretic no-go result: under the rotor (sandwich) action on the Clifford algebra $\mathrm{Cl}(3,0)$, the subspace invariant under the binary icosahedral group $2I$ coincides exactly with the SO(3)-invariant subspace, so a low-tensor-order Clifford feature cannot distinguish the discrete group from the continuous one.
+This forces a separate discrete component if icosahedral structure is to be used at all.
+Second, we identify and reproduce two failure modes that make a Clifford$\times$graph hybrid appear to win without actually winning: \emph{feature leakage} (a hand-placed target term yields a spurious $10^{25}\times$ improvement) and \emph{eigenvector collapse} (vertex-transitivity makes graph aggregation a scalar multiple of the identity, so the graph component is a no-op).
+Third, in the regime where both components are genuinely load-bearing, a matched-capacity hybrid beats either component alone by $3.2\times$ on a synthetic 600-cell task and by $5.5\times$ on the real buckminsterfullerene (C60) bond graph, with the relative ordering of the single-component models reversing between the two---direct evidence that continuous and discrete symmetry carry different information.
+Every equivariance claim is checked by an explicit numerical gate.
+All experiments are pure NumPy and reproducible in a single pass.
+\end{abstract}
+
+\section{Introduction}
+
+Geometric deep learning offers two largely separate toolkits for symmetry.
+Continuous symmetry of 3D data is handled by equivariant networks built on irreducible representations of SO(3) or O(3)~\cite{thomas2018,fuchs2020,bronstein2021}, including Clifford- and geometric-algebra layers whose multivector products are equivariant by construction~\cite{ruhe2023,brehmer2023,dehaan2024}.
+Discrete symmetry---the point group of a crystal or molecule---is typically handled by message passing on a fixed graph, which is automatically equivariant to the graph's automorphisms.
+
+A natural idea is to fuse the two: use Clifford features for the continuous geometric content and a graph convolution for the discrete combinatorics.
+The binary icosahedral group $2I$ (order 120) makes this concrete.
+It is the binary cover of the rotational symmetry group of the icosahedron, it acts on the Clifford algebra $\mathrm{Cl}(3,0)$ through unit quaternions (rotors), and its 120 elements are exactly the vertices of the regular 600-cell~\cite{coxeter1973}, which forms a 12-regular graph carrying a faithful $2I$ action.
+The same group governs real icosahedral molecules such as C60.
+
+We ask a simple question: does a Clifford$\times$discrete-group hybrid actually help, and if so, when?
+Our answer is more nuanced than a benchmark number.
+We find that the naive intuition ``add a Clifford layer for orientation and a graph layer for adjacency'' is correct only under conditions that are easy to violate by accident, and we make those conditions precise.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A representation-theoretic no-go result (\S\ref{sec:nogo}): in $\mathrm{Cl}(3,0)$ under the rotor action, the $2I$-invariant and SO(3)-invariant subspaces are identical (both two-dimensional). Clifford features alone cannot separate the discrete group from the continuous group; a discrete component is mandatory, not decorative.
+  \item Two characterized failure modes (\S\ref{sec:failure}): feature leakage and eigenvector collapse, each of which produces an illusory hybrid ``win.'' We reproduce both as negative controls.
+  \item An honest hybrid result (\S\ref{sec:honest}): in the load-bearing regime, the hybrid beats either component by $3.2\times$ (synthetic 600-cell) and $5.5\times$ (real C60), with a diagnostic cross-over in the single-component ordering.
+  \item A falsifier-first methodology: every equivariance property is verified by an explicit numerical gate before any performance claim is made.
+\end{enumerate}
+
+\section{Background}
+
+\paragraph{The algebra $\mathrm{Cl}(3,0)$.}
+We work in the real Clifford algebra of Euclidean 3-space, an 8-dimensional space with orthonormal blade basis $\{1, e_1, e_2, e_3, e_{12}, e_{13}, e_{23}, e_{123}\}$ graded $0,1,1,1,2,2,2,3$.
+The geometric product is bilinear and associative but non-commutative; reversion $\tilde{m}$ flips the sign of grades 2 and 3.
+The grade-0 projection $\langle m\rangle_0$ extracts the scalar part.
+
+\paragraph{Rotor action and equivariance.}
+A unit quaternion embeds as an even-grade multivector (rotor) $R$, and acts on a multivector $m$ by the sandwich $m\mapsto Rm\tilde{R}$.
+This realizes the SO(3) action on $\mathrm{Cl}(3,0)$.
+Following the Clifford-group equivariant framework~\cite{ruhe2023}, any polynomial in geometric products with grade-wise scalar coefficients is equivariant to this action.
+We restrict to the finite subgroup $2I$ by Reynolds projection: averaging a coefficient over all 120 group elements,
+\[
+\bar{W} = \frac{1}{120}\sum_{g\in 2I} g\cdot W,
+\]
+projects it onto the $2I$-invariant subspace---the finite-group analogue of an intertwiner.
+
+\paragraph{The 600-cell and C60.}
+The 120 elements of $2I$, viewed as unit quaternions in $\mathbb{R}^4$, are the vertices of the regular 600-cell; each vertex has 12 nearest neighbours at the golden angle, giving a 12-regular graph whose automorphisms include $2I$.
+The truncated icosahedron C60 has 60 carbon atoms, each three-coordinated (90 bonds), with full icosahedral symmetry $I_h$ whose rotation subgroup has $2I$ as its binary cover.
+
+\paragraph{Gate discipline.}
+Throughout, we verify equivariance numerically before claiming it.
+For a map $f$ and the 120 group elements $g$, the gate asserts $\max_{g,m}\|f(g\cdot m)-g\cdot f(m)\|$ is at floating-point noise.
+A stacked three-block transformer built from these primitives passes the gate to $3.6\times 10^{-9}$; the residual grows only linearly with depth once equivariant normalization (rescaling each multivector by its invariant norm $\langle\tilde{m}m\rangle_0$) is inserted.
+
+\section{A Representation-Theoretic No-Go}
+\label{sec:nogo}
+
+\begin{proposition}
+Under the rotor action on $\mathrm{Cl}(3,0)$, the subspace of $2I$-invariant multivectors equals the subspace of SO(3)-invariant multivectors. Both are two-dimensional, spanned by the scalar ($1$) and pseudoscalar ($e_{123}$).
+\end{proposition}
+
+\begin{proof}[Argument]
+The rotor action decomposes $\mathrm{Cl}(3,0)$ as $\langle 1\rangle\oplus V\oplus\Lambda^2 V\oplus\langle e_{123}\rangle$, i.e.\ trivial$\oplus$vector$\oplus$bivector$\oplus$trivial.
+Since $2I\subset\mathrm{SO}(3)$ and the 3-dimensional vector representation of SO(3) remains irreducible when restricted to $2I$, no new invariants appear in the vector or bivector grades.
+Invariants therefore live only in the two trivial summands.
+Numerically, the singular values of the Reynolds projector over $2I$ are $(1,1,0,\ldots,0)$, confirming an invariant subspace of dimension exactly 2, identical to the SO(3) case.
+\end{proof}
+
+The consequence is structural: a model whose only learnable degrees of freedom are $\mathrm{Cl}(3,0)$ multiplier coefficients cannot tell $2I$ from SO(3).
+To use the discrete group, one must act on a representation where the finite group has more invariants than the continuous one---which happens in the function space on the 600-cell vertices, where the $2I$-equivariant linear maps form the 120-dimensional group algebra ($\sum_i d_i^2 = 1+4+4+9+9+16+16+25+36 = 120$), while SO(3) has no faithful action on 120 discrete points.
+
+\section{Two Ways a Hybrid Can Appear to Win}
+\label{sec:failure}
+
+\paragraph{Failure mode 1: feature leakage.}
+If the model's feature set contains a term equal to the prediction target, a linear readout fits the target trivially.
+In our first attempt the hybrid's feature list included the exact graph-aggregated geometric product appearing in the target, yielding a spurious improvement of $\sim 10^{25}\times$ over the Clifford baseline.
+The fix is to train a shared nonlinear readout over fixed primitives that do not include the target verbatim.
+
+\paragraph{Failure mode 2: eigenvector collapse.}
+On a vertex-transitive graph whose vertices are group elements, summing a vertex's neighbours of a constant orientation field returns a fixed scalar multiple of that same vertex.
+For the 600-cell with the bare rotor field, the neighbour sum equals $9.708\times$ the vertex rotor with zero variance; the adjacency acts as a scalar on this field.
+Under this collapse the ``hybrid'' did not beat the Clifford-only model (ratio $0.52\times$).
+The fix is to route an independent per-vertex signal through the neighbour sum.
+
+\section{The Honest Hybrid Result}
+\label{sec:honest}
+
+\paragraph{Protocol.}
+Each model is a width-16 MLP trained by gradient descent over four fixed, standardized feature primitives, giving all three models the same readout capacity.
+The Clifford-only model sees per-vertex geometric-product invariants with no edges; the graph-only model sees multi-hop scalar graph convolutions with no multivector product; the hybrid sees a graph-aggregated geometric product alongside plain graph and Clifford terms, but not the target itself.
+Targets are collapse-free by construction.
+We report relative test MSE (test MSE divided by target variance) on held-out random signals.
+
+\begin{table}[h]
+\centering
+\caption{Relative test MSE (lower is better). E1 separates $2I$ from SO(3); E2 and E3 are negative controls; E4 and E5 are the honest hybrid contests.}
+\begin{tabular}{lllll}
+\toprule
+Exp. & Setting & Clifford / $2I$ & Graph / SO(3) & Hybrid \\
+\midrule
+E1 & vertex-function separation & $4.6\times 10^{-19}$ & $3.1\times 10^{-3}$ & --- \\
+E2 & leakage (neg.\ control) & $7.5\times 10^{-2}$ & --- & $9.4\times 10^{-28}$ \\
+E3 & collapse (neg.\ control) & $0.457$ & --- & $0.872$ \\
+E4 & honest, synthetic 600-cell & $0.063$ & $0.112$ & $\mathbf{0.020}$ \\
+E5 & honest, real C60 & $0.153$ & $0.044$ & $\mathbf{0.008}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Honest win and cross-over.}
+In the load-bearing regime the hybrid beats the best single component by $3.2\times$ on the synthetic 600-cell and by $5.5\times$ on the real C60 bond graph (Figure~\ref{fig:capstone}).
+The most informative detail is the cross-over: on the synthetic task the Clifford-only model is the stronger single component ($0.063$ vs.\ $0.112$), whereas on C60 the ordering reverses ($0.044$ vs.\ $0.153$).
+The two symmetry sources thus carry different amounts of signal depending on the geometry, and only the fused model is robust across both regimes.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{capstone_full.png}
+\caption{Full arc. Left: $2I$ and SO(3) separate sharply in vertex-function space (E1). Centre-left: leakage and eigenvector-collapse negative controls. Centre-right: honest hybrid on the synthetic 600-cell ($3.2\times$). Right: honest hybrid on the real C60 molecule ($5.5\times$), with the single-component ordering reversed.}
+\label{fig:capstone}
+\end{figure}
+
+\section{Discussion and Limitations}
+
+The C60 target is constructed on the real molecular geometry---it is a defined function of true atomic positions and the true bond graph, not a DFT-computed property.
+The result therefore demonstrates that the hybrid advantage transfers to real icosahedral geometry, but does not yet predict a physical observable.
+The clear next step is to replace the constructed target with a real per-atom property (a non-totally-symmetric vibrational eigenvector is the most informative choice, since $I_h$ symmetry constrains which modes exist) and rerun the identical three-model contest.
+
+All models are pure NumPy at small scale; we do not compare against trained equivariant transformers on standard benchmarks such as QM9 or MD17.
+None of these limitations affect the no-go result or the two failure modes, which are exact.
+
+\paragraph{Takeaway.}
+Non-commutative (Clifford) algebra and discrete-group (graph) structure are complementary, not interchangeable.
+Clifford layers cannot separate a finite subgroup from its continuous parent at low tensor order; the discrete structure must enter through a graph acting on a richer representation.
+When it does, and when neither contamination nor degeneracy is present, the fusion yields a real and sometimes large advantage---and the conditions under which it fails are as much a part of the contribution as the conditions under which it wins.
+
+\paragraph{Reproducibility.}
+All experiments run in a single pass in pure NumPy (plus Matplotlib); every equivariance property is checked by an explicit gate, and all reported numbers are emitted by the same script that draws Figure~\ref{fig:capstone}.
+
+\begin{thebibliography}{9}
+
+\bibitem{ruhe2023}
+D.~Ruhe, J.~Brandstetter, and P.~Forr\'e.
+\newblock Clifford Group Equivariant Neural Networks.
+\newblock In \emph{Advances in Neural Information Processing Systems 36 (NeurIPS)}, 2023.
+\newblock arXiv:2305.11141.
+
+\bibitem{liao2023}
+Y.-L.~Liao and T.~Smidt.
+\newblock Equiformer: Equivariant Graph Attention Transformer for 3D Atomistic Graphs.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2023.
+
+\bibitem{howell2025}
+O.~L.~Howell, L.~Zhao, X.~Zhu, Y.~Qian, H.~Huang, L.~Sun, W.~Thomason, R.~Platt, and R.~Walters.
+\newblock Clebsch--Gordan Transformer: Fast and Global Equivariant Attention.
+\newblock arXiv:2509.24093, 2025.
+
+\bibitem{brehmer2023}
+J.~Brehmer, P.~de~Haan, S.~Behrends, and T.~Cohen.
+\newblock Geometric Algebra Transformer.
+\newblock In \emph{Advances in Neural Information Processing Systems 36 (NeurIPS)}, 2023.
+\newblock arXiv:2305.18415.
+
+\bibitem{dehaan2024}
+P.~de~Haan, T.~Cohen, and J.~Brehmer.
+\newblock Euclidean, Projective, Conformal: Choosing a Geometric Algebra for Equivariant Transformers.
+\newblock In \emph{Proceedings of the 27th International Conference on Artificial Intelligence and Statistics (AISTATS)}, 2024.
+
+\bibitem{thomas2018}
+N.~Thomas, T.~Smidt, S.~Kearnes, L.~Yang, L.~Li, K.~Kohlhoff, and P.~Riley.
+\newblock Tensor Field Networks: Rotation- and Translation-Equivariant Neural Networks for 3D Point Clouds.
+\newblock arXiv:1802.08219, 2018.
+
+\bibitem{fuchs2020}
+F.~Fuchs, D.~Worrall, V.~Fischer, and M.~Welling.
+\newblock SE(3)-Transformers: 3D Roto-Translation Equivariant Attention Networks.
+\newblock In \emph{Advances in Neural Information Processing Systems 33 (NeurIPS)}, 2020.
+
+\bibitem{bronstein2021}
+M.~M.~Bronstein, J.~Bruna, T.~Cohen, and P.~Veli\v{c}kovi\'c.
+\newblock Geometric Deep Learning: Grids, Groups, Graphs, Geodesics, and Gauges.
+\newblock arXiv:2104.13478, 2021.
+
+\bibitem{coxeter1973}
+H.~S.~M.~Coxeter.
+\newblock \emph{Regular Polytopes}.
+\newblock Dover Publications, 3rd edition, 1973.
+
+\end{thebibliography}
+
+\end{document}
