@@ -29,6 +29,7 @@ Example (same task across all states):
     }
 
 Replace the placeholder state names and phrases below before the run.
+validate_target_facts() will hard-fail if any placeholder is still present.
 """
 
 import json
@@ -51,6 +52,7 @@ EXPECTED_TOTAL       = EXPECTED_STATES * EXPECTED_PARAPHRASES  # 18
 # TARGET_FACTS: replace placeholder state names and answer-key phrases.
 # These must be phrases from the correct answer to the shared task,
 # NOT response-style cues like "start with" or "don't worry".
+# validate_target_facts() will sys.exit(1) if placeholders remain.
 # ---------------------------------------------------------------------------
 TARGET_FACTS = {
     # Replace with your actual learner states and task answer phrases:
@@ -111,6 +113,37 @@ def validate_input(rows):
 
     print(f"Input validation passed: {len(rows)} rows, "
           f"{len(by_state)} states, {EXPECTED_PARAPHRASES} paraphrases each.")
+
+
+def validate_target_facts(states):
+    """Hard-fail if TARGET_FACTS has placeholders, missing states, or empty lists."""
+    errors = []
+    for state in states:
+        if state not in TARGET_FACTS:
+            errors.append(f"Missing TARGET_FACTS entry for state: {state}")
+            continue
+        phrases = TARGET_FACTS[state]
+        if not phrases:
+            errors.append(f"TARGET_FACTS for state '{state}' is empty.")
+        for phrase in phrases:
+            if "<answer phrase" in phrase:
+                errors.append(
+                    f"TARGET_FACTS for state '{state}' still contains placeholder: {phrase}"
+                )
+    extra = set(TARGET_FACTS.keys()) - set(states)
+    if extra:
+        errors.append(
+            f"TARGET_FACTS contains state(s) not present in run JSONL: {sorted(extra)}"
+        )
+    if errors:
+        print("\n=== TARGET_FACTS VALIDATION FAILED ===")
+        for e in errors:
+            print(f"  ERROR: {e}")
+        print("\nFill true answer-key phrases before running Gate A.")
+        sys.exit(1)
+
+    print(f"TARGET_FACTS validation passed: {len(TARGET_FACTS)} states, "
+          f"all entries filled.")
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +329,9 @@ def main():
     os.makedirs("runs", exist_ok=True)
     rows = extract_all(INPUT_FILE)
 
-    # Validate before computing anything
+    # Validate inputs — both hard-fail before any metric is computed
     validate_input(rows)
+    validate_target_facts([r["state"] for r in rows])
 
     # Write field CSV
     fieldnames = ["state", "paraphrase", "gives_direct_answer", "contains_step_list",
